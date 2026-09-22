@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="tr" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FashTech Studio — AI Asistanı</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+</head>
+<body class="bg-gradient-to-b from-slate-50 via-slate-100/60 to-slate-200/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-stone-800 dark:text-stone-100 min-h-screen flex flex-col justify-between transition-colors duration-300">
+
+    <!-- Header -->
+    <header class="p-6 bg-white/90 dark:bg-slate-900/90 backdrop-blur-lg border-b border-slate-200/60 dark:border-slate-800 flex justify-between items-center max-w-4xl mx-auto w-full shadow-sm rounded-b-3xl">
+        <h1 class="text-2xl font-bold tracking-wider text-slate-700 dark:text-white">FashTech Studio</h1>
+        
+        <div class="flex items-center gap-3">
+            <!-- Dark / Light Mode Butonu -->
+            <button onclick="toggleDarkMode()" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-amber-400 transition hover:scale-105 shadow-sm" title="Tema Değiştir">
+                <span id="themeIcon">🌙</span>
+            </button>
+            <a href="/dashboard" target="_blank" class="text-sm bg-white dark:bg-slate-800 hover:bg-slate-50 dark:hover:bg-slate-700 text-slate-700 dark:text-stone-200 font-medium px-4 py-2 rounded-xl border border-slate-200 dark:border-slate-700 transition shadow-sm">Yönetim Paneli</a>
+        </div>
+    </header>
+
+    <!-- Main Chat Container -->
+    <main class="max-w-4xl mx-auto w-full p-4 flex-1 flex flex-col justify-between my-4">
+        <!-- Chat alanı -->
+        <div id="chat-box" class="space-y-4 mb-4 overflow-y-auto max-h-[60vh] p-6 bg-gradient-to-b from-white/95 via-slate-50/50 to-white/95 dark:from-slate-900/95 dark:via-slate-900/60 dark:to-slate-900/95 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-sm backdrop-blur-md">
+            <div class="flex items-start space-x-3">
+                <!-- Asistan baloncugu -->
+                <div class="bg-gradient-to-r from-slate-600 via-slate-700 to-slate-900 text-stone-100 p-4 rounded-2xl rounded-tl-sm max-w-lg text-sm shadow-md leading-relaxed border border-slate-600/40 font-normal">
+                    Merhabalar, hoş geldiniz! Size yardımcı olabilmem için öncelikle adınızı ve soyadınızı öğrenebilir miyim?
+                </div>
+            </div>
+        </div>
+
+        <!-- Input Form -->
+        <form id="chat-form" class="flex gap-3 mt-auto bg-white/90 dark:bg-slate-900/90 backdrop-blur-lg p-3 rounded-2xl border border-slate-200/60 dark:border-slate-800 shadow-sm">
+            <input type="text" id="user-input" placeholder="Mesajınızı yazın..." autocomplete="off"
+                class="flex-1 bg-slate-50/50 dark:bg-slate-800/85 border border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-stone-800 dark:text-stone-200 focus:outline-none focus:border-slate-400 dark:focus:border-slate-600 focus:bg-white dark:focus:bg-slate-800 transition text-sm">
+            <button type="submit" class="bg-gradient-to-r from-slate-500 via-slate-700 to-slate-950 dark:from-slate-700 dark:to-slate-800 hover:opacity-95 text-stone-100 px-6 py-3 rounded-xl font-medium transition shadow-md text-sm border border-slate-600/40 dark:border-slate-600">Gönder</button>
+        </form>
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center p-4 text-xs text-stone-400 dark:text-stone-500 border-t border-slate-200/40 dark:border-slate-800">
+        &copy; 2026 FashTech Studio — Tüm Hakları Saklıdır.
+    </footer>
+
+    <script>
+        const chatBox = document.getElementById('chat-box');
+        const chatForm = document.getElementById('chat-form');
+        const userInput = document.getElementById('user-input');
+
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const message = userInput.value.trim();
+            if (!message) return;
+
+            // Kullanıcı baloncugu
+            chatBox.innerHTML += `
+                <div class="flex justify-end">
+                    <div class="bg-gradient-to-r from-slate-200 to-slate-300 dark:from-slate-700 dark:to-slate-800 text-slate-900 dark:text-stone-100 border border-slate-300/80 dark:border-slate-700 p-4 rounded-2xl rounded-tr-sm max-w-lg text-sm shadow-sm font-medium leading-relaxed">${message}</div>
+                </div>
+            `;
+            userInput.value = '';
+            chatBox.scrollTop = chatBox.scrollHeight;
+
+            try {
+                const response = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                const data = await response.json();
+
+                // Yapay zeka yanıtındaki seçenekleri (1., 2., 3., 4.) otomatik alt alta yazması için formatlıyoruz
+                let formattedResponse = data.response
+                    .replace(/(\d\.\s)/g, '<br><strong>$1</strong>');
+
+                // Yapay zeka baloncugu
+                chatBox.innerHTML += `
+                    <div class="flex items-start space-x-3">
+                        <div class="bg-gradient-to-r from-slate-500 via-slate-700 to-slate-950 text-stone-100 p-4 rounded-2xl rounded-tl-sm max-w-lg text-sm shadow-md leading-relaxed border border-slate-600/40 font-normal">${formattedResponse}</div>
+                    </div>
+                `;
+                chatBox.scrollTop = chatBox.scrollHeight;
+            } catch (err) {
+                console.error('Hata:', err);
+            }
+        });
+
+        // Tema Değiştirme Fonksiyonu
+        function toggleDarkMode() {
+            const html = document.documentElement;
+            const themeIcon = document.getElementById('themeIcon');
+            
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                themeIcon.textContent = '🌙';
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                themeIcon.textContent = '☀️';
+            }
+        }
+
+        // Sayfa açıldığında hafızadaki temayı yükle
+        window.addEventListener('DOMContentLoaded', async () => {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            const themeIcon = document.getElementById('themeIcon');
+            if (savedTheme === 'dark') {
+                document.documentElement.classList.add('dark');
+                if (themeIcon) themeIcon.textContent = '☀️';
+            } else {
+                document.documentElement.classList.remove('dark');
+                if (themeIcon) themeIcon.textContent = '🌙';
+            }
+
+            try {
+                await fetch('/api/reset', { method: 'POST' });
+            } catch (err) {
+                console.error('Sıfırlama hatası:', err);
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="tr" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FashTech Studio — Yönetim Paneli</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+        }
+    </script>
+</head>
+<body class="bg-gradient-to-b from-slate-50 via-slate-100/60 to-slate-200/40 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 text-stone-800 dark:text-stone-100 min-h-screen flex flex-col justify-between transition-colors duration-300">
+
+    <!-- Header -->
+    <header class="p-6 bg-white/90 dark:bg-slate-900/90 backdrop-blur-lg border-b border-slate-200/60 dark:border-slate-800 flex justify-between items-center max-w-6xl mx-auto w-full shadow-sm rounded-b-3xl mt-4">
+        <div>
+            <h1 class="text-2xl font-bold tracking-wider text-slate-700 dark:text-white">Yönetim Paneli</h1>
+            <p class="text-xs text-stone-500 dark:text-stone-400 mt-0.5">Toplanan Müşteri (Lead) Listesi</p>
+        </div>
+        
+        <div class="flex items-center gap-3">
+            <!-- Dark / Light Mode Butonu -->
+            <button onclick="toggleDarkMode()" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-amber-400 transition hover:scale-105 shadow-sm" title="Tema Değiştir">
+                <span id="themeIcon">🌙</span>
+            </button>
+            <a href="/" class="text-sm bg-gradient-to-r from-slate-500 via-slate-700 to-slate-950 dark:from-slate-700 dark:to-slate-800 text-stone-100 font-medium px-5 py-2.5 rounded-xl transition shadow-md border border-slate-600/40 hover:opacity-95">Asistana Dön</a>
+        </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="max-w-6xl mx-auto w-full p-4 flex-1 my-6">
+        
+        <!-- Özet Kartları -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+            <div class="bg-white/95 dark:bg-slate-900/90 backdrop-blur-md p-5 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs text-stone-400 dark:text-stone-500 font-medium uppercase tracking-wider">Toplam Lead</p>
+                    <h3 id="totalCount" class="text-2xl font-bold text-slate-700 dark:text-white mt-1">{{ leads|length }}</h3>
+                </div>
+                <div class="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 font-bold border border-slate-200 dark:border-slate-700">
+                    📊
+                </div>
+            </div>
+            <div class="bg-white/95 dark:bg-slate-900/90 backdrop-blur-md p-5 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs text-stone-400 dark:text-stone-500 font-medium uppercase tracking-wider">Durum</p>
+                    <h3 class="text-lg font-semibold text-emerald-600 dark:text-emerald-400 mt-1">Sistem Aktif</h3>
+                </div>
+                <div class="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/40 flex items-center justify-center text-emerald-600 dark:text-emerald-400 font-bold border border-emerald-100 dark:border-emerald-900/50">
+                    🟢
+                </div>
+            </div>
+            <div class="bg-white/95 dark:bg-slate-900/90 backdrop-blur-md p-5 rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-sm flex items-center justify-between">
+                <div>
+                    <p class="text-xs text-stone-400 dark:text-stone-500 font-medium uppercase tracking-wider">Veritabanı</p>
+                    <h3 class="text-lg font-semibold text-slate-700 dark:text-white mt-1">SQLite (Kalıcı)</h3>
+                </div>
+                <div class="w-12 h-12 rounded-2xl bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-600 dark:text-slate-300 font-bold border border-slate-200 dark:border-slate-700">
+                    💾
+                </div>
+            </div>
+        </div>
+
+        <!-- Tablo ve Arama Alanı -->
+        <div class="bg-white/95 dark:bg-slate-900/95 backdrop-blur-md rounded-3xl border border-slate-200/60 dark:border-slate-800 shadow-sm overflow-hidden">
+            <div class="p-6 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4">
+                <h2 class="font-bold text-slate-700 dark:text-white text-lg">Gelen Başvurular</h2>
+                
+                <!-- Arama Kutusu -->
+                <div class="relative w-full md:w-72">
+                    <span class="absolute inset-y-0 left-0 flex items-center pl-3.5 text-stone-400">🔍</span>
+                    <input type="text" id="searchInput" onkeyup="filterTable()" placeholder="İsim veya telefon ara..." class="w-full pl-10 pr-4 py-2 bg-slate-50 dark:bg-slate-800/85 border border-slate-200 dark:border-slate-700 rounded-2xl text-sm text-slate-800 dark:text-stone-200 focus:outline-none focus:ring-2 focus:ring-slate-400 transition">
+                </div>
+            </div>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full text-left border-collapse text-sm" id="leadsTable">
+                    <thead>
+                        <tr class="bg-slate-50/70 dark:bg-slate-800/50 text-stone-400 dark:text-stone-400 text-xs uppercase tracking-wider border-b border-slate-200/60 dark:border-slate-800">
+                            <th class="p-4 font-semibold">ID</th>
+                            <th class="p-4 font-semibold">İsim</th>
+                            <th class="p-4 font-semibold">Telefon Numarası</th>
+                            <th class="p-4 font-semibold">Sohbet / Detay Özeti</th>
+                            <th class="p-4 font-semibold text-right">İşlemler</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800 text-stone-700 dark:text-stone-300">
+                        {% if leads %}
+                            {% for lead in leads %}
+                            <tr class="hover:bg-slate-50/50 dark:hover:bg-slate-800/30 transition lead-row">
+                                <td class="p-4 font-medium text-slate-400 dark:text-slate-500">#{{ lead[0] }}</td>
+                                <td class="p-4 font-semibold text-slate-800 dark:text-stone-100 lead-name">{{ lead[1] }}</td>
+                                <td class="p-4">
+                                    <span class="bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-stone-200 px-3 py-1 rounded-lg border border-slate-200 dark:border-slate-700 font-mono text-xs lead-phone">{{ lead[2] }}</span>
+                                </td>
+                                <td class="p-4 text-stone-600 dark:text-stone-400 max-w-md">{{ lead[3] }}</td>
+                                <td class="p-4 text-right">
+                                    <button onclick="deleteLead('{{ lead[0] }}')" class="bg-red-50 dark:bg-red-950/40 hover:bg-red-100 dark:hover:bg-red-900/50 text-red-600 dark:text-red-400 px-3 py-1.5 rounded-xl text-xs font-medium border border-red-200 dark:border-red-900/50 transition shadow-sm">
+                                        Sil
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                            <tr id="emptyRow">
+                                <td colspan="5" class="p-8 text-center text-stone-400 dark:text-stone-500">
+                                    Henüz kaydedilmiş bir lead (müşteri) bulunmuyor. Asistan üzerinden test edip telefon numarası bırakabilirsin!
+                                </td>
+                            </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="text-center p-4 text-xs text-stone-400 dark:text-stone-500 border-t border-slate-200/40 dark:border-slate-800">
+        &copy; 2026 FashTech Studio — Yönetim Paneli
+    </footer>
+
+    <!-- Scriptler (Arama, Silme ve Tema) -->
+    <script>
+        // 1. Arama Filtreleme Fonksiyonu
+        function filterTable() {
+            const input = document.getElementById('searchInput');
+            const filter = input.value.toLowerCase();
+            const rows = document.getElementsByClassName('lead-row');
+
+            for (let i = 0; i < rows.length; i++) {
+                const nameCol = rows[i].getElementsByClassName('lead-name')[0];
+                const phoneCol = rows[i].getElementsByClassName('lead-phone')[0];
+                
+                if (nameCol || phoneCol) {
+                    const nameText = nameCol.textContent || nameCol.innerText;
+                    const phoneText = phoneCol.textContent || phoneCol.innerText;
+                    
+                    if (nameText.toLowerCase().indexOf(filter) > -1 || phoneText.toLowerCase().indexOf(filter) > -1) {
+                        rows[i].style.display = "";
+                    } else {
+                        rows[i].style.display = "none";
+                    }
+                }
+            }
+        }
+
+        // 2. Kayıt Silme Fonksiyonu
+        async function deleteLead(id) {
+            if (!confirm('Bu kaydı silmek istediğinize emin misiniz?')) return;
+            try {
+                const res = await fetch(`/dashboard/delete/${id}`, { method: 'POST' });
+                if (res.ok) {
+                    window.location.reload();
+                } else {
+                    alert('Silinirken bir hata oluştu.');
+                }
+            } catch (err) {
+                console.error('Hata:', err);
+            }
+        }
+
+        // 3. Dark / Light Mode Geçiş Fonksiyonu
+        function toggleDarkMode() {
+            const html = document.documentElement;
+            const themeIcon = document.getElementById('themeIcon');
+            
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                localStorage.setItem('theme', 'light');
+                themeIcon.textContent = '🌙';
+            } else {
+                html.classList.add('dark');
+                localStorage.setItem('theme', 'dark');
+                themeIcon.textContent = '☀️';
+            }
+        }
+
+        // Sayfa açıldığında kayıtlı temayı yükle
+        window.addEventListener('DOMContentLoaded', () => {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            const themeIcon = document.getElementById('themeIcon');
+            if (savedTheme === 'dark') {
+                document.documentElement.classList.add('dark');
+                themeIcon.textContent = '☀️';
+            } else {
+                document.documentElement.classList.remove('dark');
+                themeIcon.textContent = '🌙';
+            }
+        });
+    </script>
+</body>
+</html>

@@ -11,7 +11,7 @@ from flask import (
 )
 
 from app.database import add_lead, get_all_leads
-from app.services.ai_service import ask_fashtech_ai
+from app.services.ai_service import AIServiceError, ai_service
 
 
 # Sayfa rotaları ve API rotaları birbirinden ayrı tutulur.
@@ -153,11 +153,11 @@ def chat():
         state["name"] = name_match.group(1).title()
 
     try:
-        ai_response, updated_history = ask_fashtech_ai(
+        ai_response, updated_history = ai_service.yanit_uret(
             user_message,
             state.get("history", []),
         )
-    except Exception:
+    except AIServiceError:
         current_app.logger.exception("AI yanıtı alınamadı")
         return api_error(
             "Şu anda yanıt veremiyorum. Lütfen biraz sonra tekrar deneyin.",

@@ -100,6 +100,27 @@ def chat():
 
     state = session.get("chat_state") or new_chat_state()
 
+    # Wix, Flask oturum çerezini koruyamadığında konuşma geçmişini
+    # her istekte ayrıca gönderebilir.
+    if "gecmis" in data:
+        incoming_history = data["gecmis"]
+
+        if not isinstance(incoming_history, list) or len(incoming_history) > 8:
+            return api_error("Geçersiz sohbet geçmişi.", 400)
+
+        valid_history = all(
+            isinstance(item, dict)
+            and item.get("role") in ("user", "assistant")
+            and isinstance(item.get("content"), str)
+            and 0 < len(item["content"]) <= 4000
+            for item in incoming_history
+        )
+
+        if not valid_history:
+            return api_error("Geçersiz sohbet geçmişi.", 400)
+
+        state["history"] = incoming_history
+
     email_match = EMAIL_PATTERN.search(user_message)
     phone_match = PHONE_PATTERN.search(user_message)
 
@@ -222,6 +243,7 @@ def chat():
         "basari": True,
         "response": ai_response,
         "cevap": ai_response,
+        "gecmis": state["history"],
     })
 
 

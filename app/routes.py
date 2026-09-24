@@ -1,3 +1,4 @@
+
 import hmac
 import re
 
@@ -20,10 +21,24 @@ api_bp = Blueprint("api", __name__)
 DEFAULT_NAME = "FashTech Müşterisi"
 DEFAULT_TOPIC = "Genel Bilgi / Seçim Yapılmadı"
 
+TOPICS = {
+    "1": "Sanal Deneme Odası Hakkında Bilgi",
+    "2": "Dijital İkiz ve Entegrasyon",
+    "3": "Demo Görüşmesi Talebi",
+    "4": "Kayıt Silme Talebi",
+}
+
 EMAIL_PATTERN = re.compile(
     r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
 )
 PHONE_PATTERN = re.compile(r"(?<!\d)0?(5\d{9})(?!\d)")
+
+NAME_PATTERN = re.compile(
+    r"^(?:(?:adım|ismim|benim adım)\s+)?"
+    r"([A-Za-zÇĞİÖŞÜçğıöşü]+"
+    r"(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü]+){1,2})$",
+    flags=re.IGNORECASE,
+)
 
 
 def new_chat_state():
@@ -34,6 +49,7 @@ def new_chat_state():
         "appointment": "",
         "history": [],
         "saved_phone": "",
+        "saved_action": "",
     }
 
 
@@ -53,6 +69,79 @@ def valid_leads_api_key():
         expected_key
         and hmac.compare_digest(provided_key, expected_key)
     )
+
+
+def extract_name(message):
+    message = message.strip().rstrip(".!?")
+    match = NAME_PATTERN.fullmatch(message)
+
+    if not match:
+        return None
+
+    return match.group(1).title()
+
+
+def restore_state_from_history(state, history):
+    """
+    Wix her istekte sohbet geçmişini gönderdiği için, önceki
+    konu seçimini ve ad-soyadı bu geçmişten geri bulur.
+    """
+    for item in history:
+        if item["role"] != "user":
+            continue
+
+        previous_message = item["content"].strip()
+
+        if previous_message in TOPICS:
+            state["topic"] = TOPICS[previous_message]
+
+        previous_name = extract_name(previous_message)
+        if previous_name:
+            state["name"] = previous_name
+
+        previous_email = EMAIL_PATTERN.search(previous_message)
+        if previous_email:
+            state["email"] = previous_email.group(0)
+
+    # Aynı sohbet geçmişinde işlem zaten tamamlandıysa tekrar kaydetme.
+    for item in history:
+        if item["role"] != "assistant":
+            continue
+
+        content = item["content"]
+
+        if "DEMO_TALEBI_KAYDEDILDI" in content:
+            state["saved_action"] = "demo"
+
+        if "SILME_TALEBI_KAYDEDILDI" in content:
+            state["saved_action"] = "delete"
+
+
+def set_last_assistant_message(history, response):
+    """
+    Kullanıcıya gönderilen gerçek yanıtı Wix sohbet geçmişine de yazar.
+    Böylece sonraki istekte eski AI yanıtı değil, işlem sonucu görülür.
+    """
+    if history and history[-1].get("role") == "assistant":
+        history[-1]["content"] = response
+
+    return history[-8:]
+
+
+def chat_response(state, response):
+    state["history"] = set_last_assistant_message(
+        state["history"],
+        response,
+    )
+
+    session["chat_state"] = state
+
+    return jsonify({
+        "basari": True,
+        "response": response,
+        "cevap": response,
+        "gecmis": state["history"],
+    })
 
 
 @pages_bp.route("/", methods=["GET"])
@@ -98,7 +187,6 @@ def chat():
 
     state = session.get("chat_state") or new_chat_state()
 
-    # Wix konuşma geçmişini her istekte ayrıca gönderebilir.
     if "gecmis" in data:
         incoming_history = data["gecmis"]
 
@@ -117,6 +205,7 @@ def chat():
             return api_error("Geçersiz sohbet geçmişi.", 400)
 
         state["history"] = incoming_history
+        restore_state_from_history(state, incoming_history)
 
     email_match = EMAIL_PATTERN.search(user_message)
     phone_match = PHONE_PATTERN.search(user_message)
@@ -124,15 +213,15 @@ def chat():
     if email_match:
         state["email"] = email_match.group(0)
 
-    topics = {
-        "1": "Sanal Deneme Odası Hakkında Bilgi",
-        "2": "Dijital İkiz ve Entegrasyon",
-        "3": "Demo Görüşmesi Talebi",
-        "4": "Kayıt Silme Talebi",
-    }
+    if user_message in TOPICS:
+        state["topic"] = TOPICS[user_message]
+        state["saved_action"] = ""
+        state["saved_phone"] = ""
 
-    if user_message in topics:
-        state["topic"] = topics[user_message]
+    current_name = extract_name(user_message)
+
+    if current_name and not phone_match and not email_match:
+        state["name"] = current_name
 
     lower_message = user_message.lower()
 
@@ -153,22 +242,13 @@ def chat():
     )
 
     if (
-        not phone_match
+        state["topic"] == "Demo Görüşmesi Talebi"
+        and not phone_match
         and not email_match
-        and user_message not in topics
+        and user_message not in TOPICS
         and any(word in lower_message for word in time_keywords)
     ):
         state["appointment"] = user_message
-
-    name_match = re.search(
-        r"^(?:adım|ismim|benim adım)\s+"
-        r"([A-Za-zÇĞİÖŞÜçğıöşü]+(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü]+){0,2})$",
-        user_message,
-        flags=re.IGNORECASE,
-    )
-
-    if name_match:
-        state["name"] = name_match.group(1).title()
 
     try:
         ai_response, updated_history = ai_service.yanit_uret(
@@ -184,7 +264,22 @@ def chat():
 
     state["history"] = updated_history[-8:]
 
-    if phone_match:
+    if user_message == "4":
+        ai_response = (
+            "Kayıt silme talebinizi iletmek için adınızı, soyadınızı "
+            "ve kayıtta kullandığınız telefon numaranızı paylaşın. "
+            "Talebiniz incelenmek üzere iletilecek; kaydınız "
+            "otomatik olarak silinmeyecektir."
+        )
+
+    elif user_message == "3":
+        ai_response = (
+            "Demo görüşmesi talebiniz için adınızı, soyadınızı "
+            "ve telefon numaranızı paylaşabilirsiniz. "
+            "İsterseniz görüşme için uygun olduğunuz zamanı da belirtin."
+        )
+
+    elif phone_match:
         phone = phone_match.group(1)
 
         invalid_phone = (
@@ -209,47 +304,114 @@ def chat():
                 "Lütfen 5 ile başlayan 10 haneli numaranızı kontrol edin."
             )
 
-        elif state["name"] == DEFAULT_NAME:
+        elif state["topic"] == "Kayıt Silme Talebi":
+            if state["name"] == DEFAULT_NAME:
+                ai_response = (
+                    "Silme talebinizi iletebilmem için önce adınızı "
+                    "ve soyadınızı yazar mısınız?"
+                )
+
+            elif (
+                state.get("saved_action") == "delete"
+                and state.get("saved_phone") == phone
+            ):
+                ai_response = (
+                    "Silme talebiniz daha önce iletildi. "
+                    "Kaydınız henüz silinmedi."
+                )
+
+            else:
+                try:
+                    add_lead(
+                        name=state["name"],
+                        phone=phone,
+                        message=(
+                            "KAYIT SİLME TALEBİ — "
+                            "Yapay zekâ asistanı üzerinden iletildi. "
+                            "Mevcut müşteri kaydı otomatik silinmedi."
+                        ),
+                        chat_summary=(
+                            f"Talepte bulunan: {state['name']} | "
+                            f"Telefon: {phone} | "
+                            "Yetkili tarafından incelenmesi gerekiyor."
+                        ),
+                    )
+
+                    state["saved_phone"] = phone
+                    state["saved_action"] = "delete"
+
+                    ai_response = (
+                        "SILME_TALEBI_KAYDEDILDI\n"
+                        "Kayıt silme talebinizi inceleme için ilettim. "
+                        "Kaydınız henüz silinmedi. "
+                        "Bu işlem kimlik doğrulaması veya silme onayı değildir."
+                    )
+
+                except Exception:
+                    current_app.logger.exception(
+                        "Kayıt silme talebi oluşturulamadı"
+                    )
+                    ai_response = (
+                        "Silme talebinizi şu anda iletemedim. "
+                        "Lütfen daha sonra tekrar deneyin."
+                    )
+
+        elif state["topic"] == "Demo Görüşmesi Talebi":
+            if state["name"] == DEFAULT_NAME:
+                ai_response = (
+                    "Demo talebinizi kaydedebilmem için önce adınızı "
+                    "ve soyadınızı yazar mısınız?"
+                )
+
+            elif (
+                state.get("saved_action") == "demo"
+                and state.get("saved_phone") == phone
+            ):
+                ai_response = "Demo talebiniz daha önce kaydedildi."
+
+            else:
+                try:
+                    add_lead(
+                        name=state["name"],
+                        phone=phone,
+                        message=(
+                            "Yapay zekâ asistanı üzerinden demo talebi. "
+                            f"Konu: {state['topic']}"
+                        ),
+                        chat_summary=(
+                            f"Konu: {state['topic']} | "
+                            f"Randevu tercihi: {state['appointment']} | "
+                            f"E-posta: "
+                            f"{state['email'] or 'Belirtilmedi'}"
+                        ),
+                    )
+
+                    state["saved_phone"] = phone
+                    state["saved_action"] = "demo"
+
+                    ai_response = (
+                        "DEMO_TALEBI_KAYDEDILDI\n"
+                        "Demo talebinizi kaydettik. "
+                        "Bu bir görüşme veya randevu onayı değildir."
+                    )
+
+                except Exception:
+                    current_app.logger.exception(
+                        "Demo talebi oluşturulamadı"
+                    )
+                    ai_response = (
+                        "Bilgilerinizi şu anda kaydedemedik. "
+                        "Lütfen daha sonra tekrar deneyin."
+                    )
+
+        else:
             ai_response = (
-                "Demo talebinizi kaydedebilmem için önce adınızı ve soyadınızı "
-                "yazar mısınız? Örneğin: Adım Pınar Aydın"
+                "Demo talebi oluşturmak için 3 numaralı, "
+                "kayıt silme talebi iletmek için 4 numaralı "
+                "seçeneği seçebilirsiniz."
             )
 
-        elif state.get("saved_phone") != phone:
-            try:
-                add_lead(
-                    name=state["name"],
-                    phone=phone,
-                    message=(
-                        "Yapay zekâ asistanı üzerinden iletişim talebi. "
-                        f"Konu: {state['topic']}"
-                    ),
-                    chat_summary=(
-                        f"Konu: {state['topic']} | "
-                        f"Randevu tercihi: {state['appointment']} | "
-                        f"E-posta: {state['email'] or 'Belirtilmedi'}"
-                    ),
-                )
-                state["saved_phone"] = phone
-                ai_response = (
-                    "İletişim bilgilerinizi aldık. "
-                    "Bu bir görüşme veya randevu onayı değildir."
-                )
-            except Exception:
-                current_app.logger.exception("Müşteri kaydı oluşturulamadı")
-                ai_response = (
-                    "Bilgilerinizi şu anda kaydedemedik. "
-                    "Lütfen daha sonra tekrar deneyin."
-                )
-
-    session["chat_state"] = state
-
-    return jsonify({
-        "basari": True,
-        "response": ai_response,
-        "cevap": ai_response,
-        "gecmis": state["history"],
-    })
+    return chat_response(state, ai_response)
 
 
 @api_bp.route("/reset", methods=["POST"])
@@ -277,14 +439,19 @@ def create_lead():
     if not isinstance(name, str) or not name.strip():
         return api_error("Lütfen adınızı girin.", 400)
 
-    if not isinstance(phone, str) or not PHONE_PATTERN.fullmatch(phone.strip()):
+    if not isinstance(phone, str):
+        return api_error("Geçerli bir telefon numarası girin.", 400)
+
+    phone_match = PHONE_PATTERN.fullmatch(phone.strip())
+
+    if not phone_match:
         return api_error("Geçerli bir telefon numarası girin.", 400)
 
     if not isinstance(message, str):
         return api_error("Mesaj metin olmalıdır.", 400)
 
     name = name.strip()
-    phone = PHONE_PATTERN.fullmatch(phone.strip()).group(1)
+    phone = phone_match.group(1)
 
     if len(name) > 100 or len(message) > 2000:
         return api_error("Gönderilen bilgi çok uzun.", 400)

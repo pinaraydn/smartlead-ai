@@ -10,11 +10,10 @@ from flask import (
     session,
 )
 
-from app.database import add_lead, get_all_leads
+from app.database import add_lead, get_all_leads, delete_lead
 from app.services.ai_service import AIServiceError, ai_service
 
 
-# Sayfa rotaları ve API rotaları birbirinden ayrı tutulur.
 pages_bp = Blueprint("pages", __name__)
 api_bp = Blueprint("api", __name__)
 
@@ -66,7 +65,7 @@ def health():
     return jsonify({"status": "ok", "basari": True})
 
 
-# Eski Flask yönetim paneli, güvenli giriş kurulana kadar kapalı kalır.
+# Eski Flask yönetim paneli kapalı kalır.
 @pages_bp.route("/dashboard", methods=["GET"])
 @pages_bp.route("/dashboard/delete/<int:lead_id>", methods=["POST"])
 def dashboard_temporarily_disabled(lead_id=None):
@@ -84,7 +83,6 @@ def chat():
     if not isinstance(data, dict):
         return api_error("Geçerli bir JSON isteği gönderin.", 400)
 
-    # Hem mevcut Flask sohbeti hem de Wix bağlantısı için iki alanı kabul eder.
     user_message = data.get("mesaj", data.get("message", ""))
 
     if not isinstance(user_message, str):
@@ -100,8 +98,7 @@ def chat():
 
     state = session.get("chat_state") or new_chat_state()
 
-    # Wix, Flask oturum çerezini koruyamadığında konuşma geçmişini
-    # her istekte ayrıca gönderebilir.
+    # Wix konuşma geçmişini her istekte ayrıca gönderebilir.
     if "gecmis" in data:
         incoming_history = data["gecmis"]
 
@@ -187,7 +184,6 @@ def chat():
 
     state["history"] = updated_history[-8:]
 
-    # Mevcut Flask sohbetindeki telefonla kayıt davranışı korunur.
     if phone_match:
         phone = phone_match.group(1)
 
@@ -213,12 +209,21 @@ def chat():
                 "Lütfen 5 ile başlayan 10 haneli numaranızı kontrol edin."
             )
 
+        elif state["name"] == DEFAULT_NAME:
+            ai_response = (
+                "Demo talebinizi kaydedebilmem için önce adınızı ve soyadınızı "
+                "yazar mısınız? Örneğin: Adım Pınar Aydın"
+            )
+
         elif state.get("saved_phone") != phone:
             try:
                 add_lead(
                     name=state["name"],
                     phone=phone,
-                    message=user_message,
+                    message=(
+                        "Yapay zekâ asistanı üzerinden iletişim talebi. "
+                        f"Konu: {state['topic']}"
+                    ),
                     chat_summary=(
                         f"Konu: {state['topic']} | "
                         f"Randevu tercihi: {state['appointment']} | "
@@ -317,4 +322,21 @@ def list_leads():
     return jsonify({
         "basari": True,
         "leads": leads,
+    })
+
+
+@api_bp.route("/leads/<int:lead_id>", methods=["DELETE"])
+def remove_lead(lead_id):
+    if not valid_leads_api_key():
+        return api_error("Yetkisiz erişim.", 403)
+
+    try:
+        delete_lead(lead_id)
+    except Exception:
+        current_app.logger.exception("Müşteri kaydı silinemedi")
+        return api_error("Kayıt silinemedi.", 500)
+
+    return jsonify({
+        "basari": True,
+        "message": "Kayıt silindi.",
     })

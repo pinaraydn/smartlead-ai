@@ -9,6 +9,7 @@ class Config:
     DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///smartlead.db")
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
     LEADS_API_KEY = os.environ.get("LEADS_API_KEY")
+    ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
 
     AI_PROVIDER = os.environ.get("AI_PROVIDER", "groq")
     CORS_ORIGINS = os.environ.get("CORS_ORIGINS", "")

@@ -1,5 +1,6 @@
 import os
 
+from flask_cors import CORS
 from flask import Flask
 
 from config import config_by_name
@@ -17,7 +18,16 @@ def create_app():
         config_by_name["production"],
     )
     app.config.from_object(selected_config)
+    origins = app.config.get("CORS_ORIGINS", "")
+    origins = [origin.strip() for origin in origins.split(",") if origin.strip()]
 
+    CORS(
+        app,
+        origins=origins,
+        methods=["GET", "POST", "DELETE", "OPTIONS"],
+        allow_headers=["Content-Type", "X-API-Key"]
+    )
+    
     init_db(app)
 
     # API adresleri /api ile başlar; sayfa adresleri ayrı kalır.

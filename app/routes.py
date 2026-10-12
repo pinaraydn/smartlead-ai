@@ -2,7 +2,18 @@
 import hmac
 import secrets
 from functools import wraps
-import re
+from app.services.chat_service import (
+    DEFAULT_NAME,
+    DEFAULT_TOPIC,
+    TOPICS,
+    EMAIL_PATTERN,
+    PHONE_PATTERN,
+    NAME_PATTERN,
+    new_chat_state,
+    extract_name,
+    restore_state_from_history,
+    set_last_assistant_message,
+)
 
 from flask import (
     Blueprint,
@@ -22,28 +33,6 @@ from app.services.ai_service import AIServiceError, ai_service
 
 pages_bp = Blueprint("pages", __name__)
 api_bp = Blueprint("api", __name__)
-
-DEFAULT_NAME = "FashTech Müşterisi"
-DEFAULT_TOPIC = "Genel Bilgi / Seçim Yapılmadı"
-
-TOPICS = {
-    "1": "Sanal Deneme Odası Hakkında Bilgi",
-    "2": "Dijital İkiz ve Entegrasyon",
-    "3": "Demo Görüşmesi Talebi",
-    "4": "Kayıt Silme Talebi",
-}
-
-EMAIL_PATTERN = re.compile(
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
-)
-PHONE_PATTERN = re.compile(r"(?<!\d)0?(5\d{9})(?!\d)")
-
-NAME_PATTERN = re.compile(
-    r"^(?:(?:adım|ismim|benim adım)\s+)?"
-    r"([A-Za-zÇĞİÖŞÜçğıöşü]+"
-    r"(?:\s+[A-Za-zÇĞİÖŞÜçğıöşü]+){1,2})$",
-    flags=re.IGNORECASE,
-)
 
 
 def new_chat_state():

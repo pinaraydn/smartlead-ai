@@ -1,6 +1,8 @@
 
 import hmac
 import secrets
+from app.services import chat_service
+from app.services.chat_service import ChatService
 from functools import wraps
 from app.services.chat_service import (
     DEFAULT_NAME,
@@ -319,48 +321,9 @@ def chat():
         state["history"] = incoming_history
         restore_state_from_history(state, incoming_history)
 
-    email_match = EMAIL_PATTERN.search(user_message)
-    phone_match = PHONE_PATTERN.search(user_message)
-
-    if email_match:
-        state["email"] = email_match.group(0)
-
-    if user_message in TOPICS:
-        state["topic"] = TOPICS[user_message]
-        state["saved_action"] = ""
-        state["saved_phone"] = ""
-
-    current_name = extract_name(user_message)
-
-    if current_name and not phone_match and not email_match:
-        state["name"] = current_name
-
-    lower_message = user_message.lower()
-
-    time_keywords = (
-        "saat",
-        "bugün",
-        "yarın",
-        "pazartesi",
-        "salı",
-        "çarşamba",
-        "perşembe",
-        "cuma",
-        "cumartesi",
-        "pazar",
-        "sabah",
-        "akşam",
-        "öğleden",
-    )
-
-    if (
-        state["topic"] == "Demo Görüşmesi Talebi"
-        and not phone_match
-        and not email_match
-        and user_message not in TOPICS
-        and any(word in lower_message for word in time_keywords)
-    ):
-        state["appointment"] = user_message
+    chat_service = ChatService(state)
+    phone_match = chat_service.update_message_info(user_message)
+    chat_service.update_appointment(user_message, phone_match)
 
     try:
         ai_response, updated_history = ai_service.yanit_uret(

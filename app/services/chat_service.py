@@ -1,6 +1,7 @@
 
 import re
 
+
 DEFAULT_NAME = "FashTech Müşterisi"
 DEFAULT_TOPIC = "Genel Bilgi / Seçim Yapılmadı"
 
@@ -40,6 +41,7 @@ def new_chat_state():
 def extract_name(message):
     message = message.strip().rstrip(".!?")
     match = NAME_PATTERN.fullmatch(message)
+
     return match.group(1).title() if match else None
 
 
@@ -79,3 +81,49 @@ def set_last_assistant_message(history, response):
         history[-1]["content"] = response
 
     return history[-8:]
+
+
+class ChatService:
+    """Sohbet durumunu ve mesaj bilgilerini yönetir."""
+
+    def __init__(self, state):
+        self.state = state
+
+    def update_message_info(self, message):
+        email_match = EMAIL_PATTERN.search(message)
+        phone_match = PHONE_PATTERN.search(message)
+
+        if email_match:
+            self.state["email"] = email_match.group(0)
+
+        if message in TOPICS:
+            self.state["topic"] = TOPICS[message]
+            self.state["saved_action"] = ""
+            self.state["saved_phone"] = ""
+
+        name = extract_name(message)
+
+        if name and not phone_match and not email_match:
+            self.state["name"] = name
+
+        return phone_match
+
+    def update_appointment(self, message, phone_match):
+        time_keywords = (
+            "saat", "bugün", "yarın", "pazartesi",
+            "salı", "çarşamba", "perşembe", "cuma",
+            "cumartesi", "pazar", "sabah", "akşam",
+            "öğleden"
+        )
+
+        if (
+            self.state["topic"] == "Demo Görüşmesi Talebi"
+            and not phone_match
+            and not EMAIL_PATTERN.search(message)
+            and message not in TOPICS
+            and any(
+                word in message.lower()
+                for word in time_keywords
+            )
+        ):
+            self.state["appointment"] = message

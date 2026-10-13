@@ -1,490 +1,113 @@
 
-import hmac
-import secrets
-from app.services import chat_service
-from app.services.chat_service import ChatService
-from functools import wraps
-from app.services.chat_service import (
-    DEFAULT_NAME,
-    DEFAULT_TOPIC,
-    TOPICS,
-    EMAIL_PATTERN,
-    PHONE_PATTERN,
-    NAME_PATTERN,
-    new_chat_state,
-    extract_name,
-    restore_state_from_history,
-    set_last_assistant_message,
-)
+from flask import Blueprint
 
-from flask import (
-    Blueprint,
-    current_app,
-    jsonify,
-    render_template,
-    request,
-    session,
-    abort,
-    redirect,
-    url_for,
-)
-
-from app.database import add_lead, get_all_leads, delete_lead
-from app.services.ai_service import AIServiceError, ai_service
+from app.controllers import api_controller
+from app.controllers import page_controller
 
 
-pages_bp = Blueprint("pages", __name__)
 api_bp = Blueprint("api", __name__)
-
-
-def new_chat_state():
-    return {
-        "name": DEFAULT_NAME,
-        "topic": DEFAULT_TOPIC,
-        "email": "",
-        "appointment": "",
-        "history": [],
-        "saved_phone": "",
-        "saved_action": "",
-    }
-
-
-def api_error(message, status_code):
-    return jsonify({
-        "basari": False,
-        "error": message,
-        "response": message,
-    }), status_code
-
-
-def valid_leads_api_key():
-    expected_key = current_app.config.get("LEADS_API_KEY")
-    provided_key = request.headers.get("X-API-Key", "")
-
-    return bool(
-        expected_key
-        and hmac.compare_digest(provided_key, expected_key)
-    )
-
-
-def extract_name(message):
-    message = message.strip().rstrip(".!?")
-    match = NAME_PATTERN.fullmatch(message)
-
-    if not match:
-        return None
-
-    return match.group(1).title()
-
-
-def restore_state_from_history(state, history):
-    """
-    Wix her istekte sohbet geçmişini gönderdiği için, önceki
-    konu seçimini ve ad-soyadı bu geçmişten geri bulur.
-    """
-    for item in history:
-        if item["role"] != "user":
-            continue
-
-        previous_message = item["content"].strip()
-
-        if previous_message in TOPICS:
-            state["topic"] = TOPICS[previous_message]
-
-        previous_name = extract_name(previous_message)
-        if previous_name:
-            state["name"] = previous_name
-
-        previous_email = EMAIL_PATTERN.search(previous_message)
-        if previous_email:
-            state["email"] = previous_email.group(0)
-
-    # Aynı sohbet geçmişinde işlem zaten tamamlandıysa tekrar kaydetme.
-    for item in history:
-        if item["role"] != "assistant":
-            continue
-
-        content = item["content"]
-
-        if "DEMO_TALEBI_KAYDEDILDI" in content:
-            state["saved_action"] = "demo"
-
-        if "SILME_TALEBI_KAYDEDILDI" in content:
-            state["saved_action"] = "delete"
-
-
-def set_last_assistant_message(history, response):
-    """
-    Kullanıcıya gönderilen gerçek yanıtı Wix sohbet geçmişine de yazar.
-    Böylece sonraki istekte eski AI yanıtı değil, işlem sonucu görülür.
-    """
-    if history and history[-1].get("role") == "assistant":
-        history[-1]["content"] = response
-
-    return history[-8:]
-
-
-def chat_response(state, response):
-    state["history"] = set_last_assistant_message(
-        state["history"],
-        response,
-    )
-
-    session["chat_state"] = state
-
-    return jsonify({
-        "basari": True,
-        "response": response,
-        "cevap": response,
-        "gecmis": state["history"],
-    })
-
-
-@pages_bp.route("/", methods=["GET"])
-def index():
-    return render_template("index.html")
-
-
-@pages_bp.route("/health", methods=["GET"])
-def health():
-    return jsonify({"status": "ok", "basari": True})
-
-
-# Flask yönetim paneli: şifreli giriş ve yetkili erişim.
-
-def admin_required(view):
-    @wraps(view)
-    def wrapped_view(*args, **kwargs):
-        if not session.get("flask_admin_authenticated"):
-            return redirect(url_for("pages.dashboard_login"))
-
-        return view(*args, **kwargs)
-
-    return wrapped_view
-
-
-def admin_csrf_token():
-    token = session.get("flask_admin_csrf_token")
-
-    if not token:
-        token = secrets.token_hex(32)
-        session["flask_admin_csrf_token"] = token
-
-    return token
-
-
-def valid_admin_csrf_token():
-    expected = session.get("flask_admin_csrf_token", "")
-    provided = request.form.get("csrf_token", "")
-
-    return bool(
-        expected
-        and provided
-        and hmac.compare_digest(expected, provided)
-    )
-
-
-@pages_bp.route("/dashboard/login", methods=["GET", "POST"])
-def dashboard_login():
-    if session.get("flask_admin_authenticated"):
-        return redirect(url_for("pages.dashboard"))
-
-    if request.method == "GET":
-        return render_template(
-            "dashboard_login.html",
-            error=None,
-            csrf_token=admin_csrf_token(),
-        )
-
-    if not valid_admin_csrf_token():
-        abort(403)
-
-    expected_password = current_app.config.get("ADMIN_PASSWORD")
-    entered_password = request.form.get("password", "")
-
-    if not expected_password:
-        current_app.logger.error(
-            "ADMIN_PASSWORD ortam değişkeni tanımlanmamış."
-        )
-        return render_template(
-            "dashboard_login.html",
-            error="Yönetici girişi henüz yapılandırılmamış.",
-            csrf_token=admin_csrf_token(),
-        ), 503
-
-    if not hmac.compare_digest(
-        entered_password.encode("utf-8"),
-        expected_password.encode("utf-8"),
-    ):
-        return render_template(
-            "dashboard_login.html",
-            error="Şifre hatalı.",
-            csrf_token=admin_csrf_token(),
-        ), 401
-
-    session.clear()
-    session["flask_admin_authenticated"] = True
-    session["flask_admin_csrf_token"] = secrets.token_hex(32)
-
-    return redirect(url_for("pages.dashboard"))
-
-
-@pages_bp.route("/dashboard", methods=["GET"])
-@admin_required
-def dashboard():
-    try:
-        leads = get_all_leads()
-    except Exception:
-        current_app.logger.exception(
-            "Flask yönetim panelinde kayıtlar alınamadı."
-        )
-        return "Müşteri kayıtları şu anda yüklenemiyor.", 500
-
-    response = current_app.make_response(
-        render_template(
-            "dashboard.html",
-            leads=leads,
-            csrf_token=admin_csrf_token(),
-        )
-    )
-    response.headers["Cache-Control"] = "no-store"
-    return response
-
-
-@pages_bp.route("/dashboard/delete/<int:lead_id>", methods=["POST"])
-@admin_required
-def dashboard_delete(lead_id):
-    if not valid_admin_csrf_token():
-        abort(403)
-
-    try:
-        delete_lead(lead_id)
-    except Exception:
-        current_app.logger.exception(
-            "Flask yönetim panelinde kayıt silinemedi."
-        )
-        return "Kayıt silinemedi.", 500
-
-    return redirect(url_for("pages.dashboard"))
-
-
-@pages_bp.route("/dashboard/logout", methods=["POST"])
-@admin_required
-def dashboard_logout():
-    if not valid_admin_csrf_token():
-        abort(403)
-
-    session.clear()
-    return redirect(url_for("pages.dashboard_login"))
-
-
-@api_bp.route("/chat", methods=["POST"])
-@api_bp.route("/sohbet", methods=["POST"])
-def chat():
-    data = request.get_json(silent=True)
-
-    if not isinstance(data, dict):
-        return api_error("Geçerli bir JSON isteği gönderin.", 400)
-
-    user_message = data.get("mesaj", data.get("message", ""))
-
-    if not isinstance(user_message, str):
-        return api_error("Mesaj metin olmalıdır.", 400)
-
-    user_message = user_message.strip()
-
-    if not user_message:
-        return api_error("Lütfen bir mesaj yazın.", 400)
-
-    if len(user_message) > 2000:
-        return api_error("Mesajınız çok uzun.", 400)
-
-    state = session.get("chat_state") or new_chat_state()
-
-    if "gecmis" in data:
-        incoming_history = data["gecmis"]
-
-        if not isinstance(incoming_history, list) or len(incoming_history) > 8:
-            return api_error("Geçersiz sohbet geçmişi.", 400)
-
-        valid_history = all(
-            isinstance(item, dict)
-            and item.get("role") in ("user", "assistant")
-            and isinstance(item.get("content"), str)
-            and 0 < len(item["content"]) <= 4000
-            for item in incoming_history
-        )
-
-        if not valid_history:
-            return api_error("Geçersiz sohbet geçmişi.", 400)
-
-        state["history"] = incoming_history
-        restore_state_from_history(state, incoming_history)
-
-    chat_service = ChatService(state)
-    phone_match = chat_service.update_message_info(user_message)
-    chat_service.update_appointment(user_message, phone_match)
-
-    try:
-        ai_response, updated_history = ai_service.yanit_uret(
-            user_message,
-            state.get("history", []),
-        )
-    except AIServiceError:
-        current_app.logger.exception("AI yanıtı alınamadı")
-        return api_error(
-            "Şu anda yanıt veremiyorum. Lütfen biraz sonra tekrar deneyin.",
-            503,
-        )
-
-    state["history"] = updated_history[-8:]
-
-    
-    if user_message == "4":
-        if state["name"] != DEFAULT_NAME:
-            ai_response = (
-                "Kayıt silme talebinizi iletmek için kayıtta "
-                "kullandığınız telefon numaranızı paylaşın. "
-                "Talebiniz incelenmek üzere iletilecek; "
-                "kaydınız otomatik olarak silinmeyecektir."
-            )
-        else:
-            ai_response = (
-                "Kayıt silme talebinizi iletmek için adınızı, "
-                "soyadınızı ve kayıtta kullandığınız telefon "
-                "numaranızı paylaşın. Talebiniz incelenmek üzere "
-                "iletilecek; kaydınız otomatik olarak silinmeyecektir."
-            )
-
-    elif user_message == "3":
-        if state["name"] != DEFAULT_NAME:
-            ai_response = (
-                "Demo görüşmesi talebiniz için telefon numaranızı "
-                "paylaşabilirsiniz. İsterseniz görüşme için "
-                "uygun olduğunuz zamanı da belirtin."
-        )
-        else:
-            ai_response = (
-                "Demo görüşmesi talebiniz için adınızı, soyadınızı "
-                "ve telefon numaranızı paylaşabilirsiniz. "
-                "İsterseniz görüşme için uygun olduğunuz zamanı da belirtin."
-        )
-
-    elif phone_match:
-        phone = phone_match.group(1)
-
-        if chat_service.is_invalid_phone(phone):
-            ai_response = (
-                "Telefon numaranız geçersiz görünüyor. "
-                "Lütfen 5 ile başlayan 10 haneli numaranızı kontrol edin."
-            )
-
-        elif state["topic"] == "Kayıt Silme Talebi":
-            ai_response = chat_service.handle_delete_request(phone)
-
-        elif state["topic"] == "Demo Görüşmesi Talebi":
-            ai_response = chat_service.handle_demo_request(phone)
-
-        else:
-            ai_response = (
-                "Demo talebi oluşturmak için 3 numaralı, "
-                "kayıt silme talebi iletmek için 4 numaralı "
-                "seçeneği seçebilirsiniz."
-            )
-
-    return chat_response(state, ai_response)
-
-
-@api_bp.route("/reset", methods=["POST"])
-def reset_chat():
-    session.pop("chat_state", None)
-
-    return jsonify({
-        "basari": True,
-        "status": "success",
-        "message": "Bu ziyaretçinin sohbeti sıfırlandı.",
-    })
-
-
-@api_bp.route("/leads", methods=["POST"])
-def create_lead():
-    data = request.get_json(silent=True)
-
-    if not isinstance(data, dict):
-        return api_error("Geçerli bir JSON isteği gönderin.", 400)
-
-    name = data.get("isim", data.get("name", ""))
-    phone = data.get("telefon", data.get("phone", ""))
-    message = data.get("mesaj", data.get("message", ""))
-
-    if not isinstance(name, str) or not name.strip():
-        return api_error("Lütfen adınızı girin.", 400)
-
-    if not isinstance(phone, str):
-        return api_error("Geçerli bir telefon numarası girin.", 400)
-
-    phone_match = PHONE_PATTERN.fullmatch(phone.strip())
-
-    if not phone_match:
-        return api_error("Geçerli bir telefon numarası girin.", 400)
-
-    if not isinstance(message, str):
-        return api_error("Mesaj metin olmalıdır.", 400)
-
-    name = name.strip()
-    phone = phone_match.group(1)
-
-    if len(name) > 100 or len(message) > 2000:
-        return api_error("Gönderilen bilgi çok uzun.", 400)
-
-    try:
-        add_lead(
-            name=name,
-            phone=phone,
-            message=message.strip(),
-        )
-    except Exception:
-        current_app.logger.exception("Müşteri kaydı oluşturulamadı")
-        return api_error(
-            "Bilgileriniz şu anda kaydedilemiyor. Lütfen tekrar deneyin.",
-            500,
-        )
-
-    return jsonify({
-        "basari": True,
-        "message": "İletişim bilgileriniz kaydedildi.",
-    }), 201
-
-
-@api_bp.route("/leads", methods=["GET"])
-def list_leads():
-    if not valid_leads_api_key():
-        return api_error("Yetkisiz erişim.", 403)
-
-    try:
-        leads = get_all_leads()
-    except Exception:
-        current_app.logger.exception("Müşteri kayıtları alınamadı")
-        return api_error("Kayıtlar şu anda alınamıyor.", 500)
-
-    return jsonify({
-        "basari": True,
-        "leads": leads,
-    })
-
-
-@api_bp.route("/leads/<int:lead_id>", methods=["DELETE"])
-def remove_lead(lead_id):
-    if not valid_leads_api_key():
-        return api_error("Yetkisiz erişim.", 403)
-
-    try:
-        delete_lead(lead_id)
-    except Exception:
-        current_app.logger.exception("Müşteri kaydı silinemedi")
-        return api_error("Kayıt silinemedi.", 500)
-
-    return jsonify({
-        "basari": True,
-        "message": "Kayıt silindi.",
-    })
+pages_bp = Blueprint("pages", __name__)
+
+
+# ============================================================
+# CHAT API
+# ============================================================
+
+api_bp.add_url_rule(
+    "/chat",
+    endpoint="chat",
+    view_func=api_controller.chat,
+    methods=["POST"],
+)
+
+api_bp.add_url_rule(
+    "/sohbet",
+    endpoint="sohbet",
+    view_func=api_controller.chat,
+    methods=["POST"],
+)
+
+api_bp.add_url_rule(
+    "/reset",
+    endpoint="reset_chat",
+    view_func=api_controller.reset_chat,
+    methods=["POST"],
+)
+
+
+# ============================================================
+# MUSTERI KAYIT API
+# ============================================================
+
+api_bp.add_url_rule(
+    "/leads",
+    endpoint="create_lead",
+    view_func=api_controller.create_lead,
+    methods=["POST"],
+)
+
+api_bp.add_url_rule(
+    "/leads",
+    endpoint="list_leads",
+    view_func=api_controller.list_leads,
+    methods=["GET"],
+)
+
+api_bp.add_url_rule(
+    "/leads/<int:lead_id>",
+    endpoint="remove_lead",
+    view_func=api_controller.remove_lead,
+    methods=["DELETE"],
+)
+
+
+# ============================================================
+# GENEL SAYFALAR
+# ============================================================
+
+pages_bp.add_url_rule(
+    "/",
+    endpoint="index",
+    view_func=page_controller.index,
+    methods=["GET"],
+)
+
+pages_bp.add_url_rule(
+    "/health",
+    endpoint="health",
+    view_func=page_controller.health,
+    methods=["GET"],
+)
+
+
+# ============================================================
+# YONETIM PANELI
+# ============================================================
+
+pages_bp.add_url_rule(
+    "/dashboard/login",
+    endpoint="dashboard_login",
+    view_func=page_controller.dashboard_login,
+    methods=["GET", "POST"],
+)
+
+pages_bp.add_url_rule(
+    "/dashboard",
+    endpoint="dashboard",
+    view_func=page_controller.dashboard,
+    methods=["GET"],
+)
+
+pages_bp.add_url_rule(
+    "/dashboard/delete/<int:lead_id>",
+    endpoint="dashboard_delete",
+    view_func=page_controller.dashboard_delete,
+    methods=["POST"],
+)
+
+pages_bp.add_url_rule(
+    "/dashboard/logout",
+    endpoint="dashboard_logout",
+    view_func=page_controller.dashboard_logout,
+    methods=["POST"],
+)

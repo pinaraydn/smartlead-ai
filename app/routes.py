@@ -339,145 +339,51 @@ def chat():
 
     state["history"] = updated_history[-8:]
 
+    
     if user_message == "4":
-        ai_response = (
-            "Kayıt silme talebinizi iletmek için adınızı, soyadınızı "
-            "ve kayıtta kullandığınız telefon numaranızı paylaşın. "
-            "Talebiniz incelenmek üzere iletilecek; kaydınız "
-            "otomatik olarak silinmeyecektir."
-        )
+        if state["name"] != DEFAULT_NAME:
+            ai_response = (
+                "Kayıt silme talebinizi iletmek için kayıtta "
+                "kullandığınız telefon numaranızı paylaşın. "
+                "Talebiniz incelenmek üzere iletilecek; "
+                "kaydınız otomatik olarak silinmeyecektir."
+            )
+        else:
+            ai_response = (
+                "Kayıt silme talebinizi iletmek için adınızı, "
+                "soyadınızı ve kayıtta kullandığınız telefon "
+                "numaranızı paylaşın. Talebiniz incelenmek üzere "
+                "iletilecek; kaydınız otomatik olarak silinmeyecektir."
+            )
 
     elif user_message == "3":
-        ai_response = (
-            "Demo görüşmesi talebiniz için adınızı, soyadınızı "
-            "ve telefon numaranızı paylaşabilirsiniz. "
-            "İsterseniz görüşme için uygun olduğunuz zamanı da belirtin."
+        if state["name"] != DEFAULT_NAME:
+            ai_response = (
+                "Demo görüşmesi talebiniz için telefon numaranızı "
+                "paylaşabilirsiniz. İsterseniz görüşme için "
+                "uygun olduğunuz zamanı da belirtin."
+        )
+        else:
+            ai_response = (
+                "Demo görüşmesi talebiniz için adınızı, soyadınızı "
+                "ve telefon numaranızı paylaşabilirsiniz. "
+                "İsterseniz görüşme için uygun olduğunuz zamanı da belirtin."
         )
 
     elif phone_match:
         phone = phone_match.group(1)
 
-        invalid_phone = (
-            len(set(phone)) == 1
-            or phone in {
-                "5000000000",
-                "5111111111",
-                "5222222222",
-                "5333333333",
-                "5444444444",
-                "5555555555",
-                "5666666666",
-                "5777777777",
-                "5888888888",
-                "5999999999",
-            }
-        )
-
-        if invalid_phone:
+        if chat_service.is_invalid_phone(phone):
             ai_response = (
                 "Telefon numaranız geçersiz görünüyor. "
                 "Lütfen 5 ile başlayan 10 haneli numaranızı kontrol edin."
             )
 
         elif state["topic"] == "Kayıt Silme Talebi":
-            if state["name"] == DEFAULT_NAME:
-                ai_response = (
-                    "Silme talebinizi iletebilmem için önce adınızı "
-                    "ve soyadınızı yazar mısınız?"
-                )
-
-            elif (
-                state.get("saved_action") == "delete"
-                and state.get("saved_phone") == phone
-            ):
-                ai_response = (
-                    "Silme talebiniz daha önce iletildi. "
-                    "Kaydınız henüz silinmedi."
-                )
-
-            else:
-                try:
-                    add_lead(
-                        name=state["name"],
-                        phone=phone,
-                        message=(
-                            "KAYIT SİLME TALEBİ — "
-                            "Yapay zekâ asistanı üzerinden iletildi. "
-                            "Mevcut müşteri kaydı otomatik silinmedi."
-                        ),
-                        chat_summary=(
-                            f"Talepte bulunan: {state['name']} | "
-                            f"Telefon: {phone} | "
-                            "Yetkili tarafından incelenmesi gerekiyor."
-                        ),
-                    )
-
-                    state["saved_phone"] = phone
-                    state["saved_action"] = "delete"
-
-                    ai_response = (
-                        "SILME_TALEBI_KAYDEDILDI\n"
-                        "Kayıt silme talebinizi inceleme için ilettim. "
-                        "Kaydınız henüz silinmedi. "
-                        "Bu işlem kimlik doğrulaması veya silme onayı değildir."
-                    )
-
-                except Exception:
-                    current_app.logger.exception(
-                        "Kayıt silme talebi oluşturulamadı"
-                    )
-                    ai_response = (
-                        "Silme talebinizi şu anda iletemedim. "
-                        "Lütfen daha sonra tekrar deneyin."
-                    )
+            ai_response = chat_service.handle_delete_request(phone)
 
         elif state["topic"] == "Demo Görüşmesi Talebi":
-            if state["name"] == DEFAULT_NAME:
-                ai_response = (
-                    "Demo talebinizi kaydedebilmem için önce adınızı "
-                    "ve soyadınızı yazar mısınız?"
-                )
-
-            elif (
-                state.get("saved_action") == "demo"
-                and state.get("saved_phone") == phone
-            ):
-                ai_response = "Demo talebiniz daha önce kaydedildi."
-
-            else:
-                try:
-                    add_lead(
-                        name=state["name"],
-                        phone=phone,
-                        message=(
-                            "Yapay zekâ asistanı üzerinden demo talebi. "
-                            f"Konu: {state['topic']}"
-                        ),
-                        chat_summary=(
-                            f"Konu: {state['topic']} | "
-                            f"Randevu tercihi: {state['appointment']} | "
-                            f"E-posta: "
-                            f"{state['email'] or 'Belirtilmedi'}"
-                        ),
-                    )
-
-                    state["saved_phone"] = phone
-                    state["saved_action"] = "demo"
-
-                    ai_response = (
-                        "DEMO_TALEBI_KAYDEDILDI\n"
-                        "Demo talebinizi kaydettik. "
-                        "Bu bir görüşme veya randevu onayı değildir."
-                    )
-
-                except Exception:
-                    current_app.logger.exception(
-                        "Demo talebi oluşturulamadı"
-                    )
-                    ai_response = (
-                        "Bilgilerinizi şu anda kaydedemedik. "
-                        "Lütfen daha sonra tekrar deneyin."
-                    )
+            ai_response = chat_service.handle_demo_request(phone)
 
         else:
             ai_response = (

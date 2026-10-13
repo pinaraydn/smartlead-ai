@@ -1,4 +1,5 @@
-
+from flask import current_app
+from app.database import add_lead
 import re
 
 
@@ -55,7 +56,8 @@ def restore_state_from_history(state, history):
         if message in TOPICS:
             state["topic"] = TOPICS[message]
 
-        name = extract_name(message)
+        name_message = PHONE_PATTERN.sub("", message).strip()
+        name = extract_name(name_message)
         if name:
             state["name"] = name
 
@@ -101,9 +103,10 @@ class ChatService:
             self.state["saved_action"] = ""
             self.state["saved_phone"] = ""
 
-        name = extract_name(message)
+        name_message = PHONE_PATTERN.sub("", message).strip()
+        name = extract_name(name_message)
 
-        if name and not phone_match and not email_match:
+        if name and not email_match:
             self.state["name"] = name
 
         return phone_match
@@ -127,3 +130,67 @@ class ChatService:
             )
         ):
             self.state["appointment"] = message
+    
+    @staticmethod
+    def is_invalid_phone(phone):
+        invalid_numbers = {
+            "5000000000",
+            "5111111111",
+            "5222222222",
+            "5333333333",
+            "5444444444",
+            "5555555555",
+            "5666666666",
+            "5777777777",
+            "5888888888",
+            "5999999999",
+        }
+
+        return len(set(phone)) == 1 or phone in invalid_numbers
+
+    def handle_demo_request(self, phone):
+        if self.state["name"] == DEFAULT_NAME:
+            return (
+                "Demo talebinizi kaydedebilmem için önce adınızı "
+                "ve soyadınızı yazar mısınız?"
+            )
+
+        if (
+            self.state.get("saved_action") == "demo"
+            and self.state.get("saved_phone") == phone
+        ):
+            return "Demo talebiniz daha önce kaydedildi."
+
+        try:
+            add_lead(
+                name=self.state["name"],
+                phone=phone,
+                message=(
+                    "Yapay zekâ asistanı üzerinden demo talebi. "
+                    f"Konu: {self.state['topic']}"
+                ),
+                chat_summary=(
+                    f"Konu: {self.state['topic']} | "
+                    f"Randevu tercihi: {self.state['appointment']} | "
+                    f"E-posta: "
+                    f"{self.state['email'] or 'Belirtilmedi'}"
+                ),
+            )
+
+            self.state["saved_phone"] = phone
+            self.state["saved_action"] = "demo"
+
+            return (
+                "DEMO_TALEBI_KAYDEDILDI\n"
+                "Demo talebinizi kaydettik. "
+                "Bu bir görüşme veya randevu onayı değildir."
+            )
+
+        except Exception:
+            current_app.logger.exception(
+                "Demo talebi oluşturulamadı"
+            )
+            return (
+                "Bilgilerinizi şu anda kaydedemedik. "
+                "Lütfen daha sonra tekrar deneyin."
+            )
